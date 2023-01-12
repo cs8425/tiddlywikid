@@ -232,6 +232,10 @@ func (s *BitcaskStore) AttachAttachment(key string, file string) bool {
 	return err == nil
 }
 
+func (s *BitcaskStore) Merge() error {
+	return s.db.Merge()
+}
+
 func (s *BitcaskStore) Close() error {
 	return s.db.Close()
 }

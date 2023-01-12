@@ -101,6 +101,7 @@ func main() {
 			return
 		}
 		shoutdownFn = func() {
+			storeBitcask.Merge()
 			storeBitcask.Close()
 		}
 		store = storeBitcask

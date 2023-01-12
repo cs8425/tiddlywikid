@@ -26,6 +26,8 @@ func init() {
 	autoGen = map[string]AutoGenFn{
 		AUTO_GENERATED_NOW: NewNow,
 		AUTO_GENERATED_IP:  NewSrcIP,
+
+		GENERATED_PLUGIN: NewPlugin,
 	}
 }
 

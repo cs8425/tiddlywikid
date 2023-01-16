@@ -2,6 +2,17 @@
 
 A server implementation in goling for [TiddlyWiki](http://tiddlywiki.com/), base on [TiddlyWeb](http://tiddlyweb.com/) plugin for tiddler store (for saved tiddlers).
 
+## features
+
+* no dependency, one executable file with a base image of wiki will work.
+* use browser cache by default, tiddlers won't send again if there were no update
+	* the build-in server of TiddlyWiki will calculate the `md5` of tiddler every time when browser request that tiddler, it will wasting CPU and let latency longer.
+* auto generated tiddler
+	* `$:/sync-time`: return last time of fetching tiddlers
+	* `$:/client-ip`: return IP of wiki user
+* provide attachment api (with plugin) for binary files/large tiddlers, avoiding slowing down whole wiki.
+* more permission control: multiple users, allow/block by IP range.
+
 ## build
 
 get source

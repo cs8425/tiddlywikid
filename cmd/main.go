@@ -112,44 +112,54 @@ func main() {
 
 	var wikiHandler atomic.Value // hold handler for current config
 
-	buildHandler := func() (func(), error) {
-		auth := authpkg.NewAuthCustom()
-		if err := auth.Load(*authStore); err != nil {
-			Vln(0, "[acl]load err", err)
-			return nil, err
-		}
-		// Vln(0, "[acl]", auth.UserDB, auth.AnonymousEdit)
-
+	initWiki := func() *api.Wiki {
 		wiki := api.NewWiki(nil, store, sess)
 		wiki.SyncStoryList = *syncStoryList
 		wiki.Files = *dir
 		wiki.Base = *wikiBase
-		// wiki.Store = store
-		wiki.AuthHandler = auth
-		wiki.SetupMux(nil) // bind handler
-
-		wikiHandler.Store(wiki)
-		return nil, nil
+		return wiki
 	}
 
-	// watch for config file chnage
-	go func() {
-		clean, _ := buildHandler()
-
-		for {
-			if err := watchFile(*authStore); err == nil {
-				Vln(2, "[config]has been changed")
-				if clr, err := buildHandler(); err == nil {
-					if clean != nil {
-						clean()
-					}
-					clean = clr
-				}
+	if *authStore != "" {
+		buildHandler := func() (func(), error) {
+			auth := authpkg.NewAuthCustom()
+			if err := auth.Load(*authStore); err != nil {
+				Vln(0, "[acl]load err", err)
+				return nil, err
 			}
+			// Vln(0, "[acl]", auth.UserDB, auth.AnonymousEdit)
 
-			time.Sleep(2 * time.Second)
+			wiki := initWiki()
+			wiki.AuthHandler = auth
+			wiki.SetupMux(nil) // bind handler
+
+			wikiHandler.Store(wiki)
+			return nil, nil
 		}
-	}()
+
+		// watch for config file chnage
+		go func() {
+			clean, _ := buildHandler()
+
+			for {
+				if err := watchFile(*authStore); err == nil {
+					Vln(2, "[config]has been changed")
+					if clr, err := buildHandler(); err == nil {
+						if clean != nil {
+							clean()
+						}
+						clean = clr
+					}
+				}
+
+				time.Sleep(2 * time.Second)
+			}
+		}()
+	} else {
+		wiki := initWiki()
+		wiki.SetupMux(nil) // bind handler
+		wikiHandler.Store(wiki)
+	}
 
 	// http.Handle("/", reqlog(wiki(http.FileServer(http.Dir(*dir)))))
 	srv := &http.Server{

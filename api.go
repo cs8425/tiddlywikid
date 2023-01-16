@@ -129,7 +129,14 @@ func (wiki *Wiki) status(w http.ResponseWriter, r *http.Request) {
 
 	// no anno && not login
 	if !isAnno && !isLogin {
-		wiki.errNotLogin(w, r)
+		status := &WikiStatus{
+			Username:  "GUEST",
+			Anonymous: false,
+			ReadOnly:  true,
+			Recipe:    wiki.Recipe,
+			Version:   TIDDLIYWIKI_VERSION,
+		}
+		JsonRes(w, status, false)
 		return
 	}
 
@@ -336,7 +343,8 @@ func (wiki *Wiki) errNotLogin(w http.ResponseWriter, r *http.Request) {
 func (wiki *Wiki) list(w http.ResponseWriter, r *http.Request) {
 	isAnno, isLogin, _, sd := wiki.checkAuth(w, r)
 	if !isAnno && !isLogin { // no anno && not login
-		wiki.errNotLogin(w, r)
+		SetHeader(w, false)
+		w.Write(([]byte)(`[]`))
 		return
 	}
 
@@ -348,6 +356,7 @@ func (wiki *Wiki) list(w http.ResponseWriter, r *http.Request) {
 		NewSrcIP(r),
 		// NewPlugin(r),
 	}
+	SetHeader(w, false)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(wiki.Store.List(tds))
 }

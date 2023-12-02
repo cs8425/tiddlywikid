@@ -15,7 +15,7 @@ build plugin via node.js:
 node tiddlywiki.js srv --render '.' 'packed-plugin.json' 'text/plain' '$:/core/templates/exporters/JsonFile' 'exportFilter' '[[$:/plugins/tiddlywiki/tiddlyweb-external-attachments]]'
 
 
-build wili with plugin:
+build wiki with plugin:
 
 node tiddlywiki.js srv --render '.' 'index.html' 'text/plain' '$:/core/save/all'
 # node tiddlywiki.js srv --rendertiddler "$:/core/save/all" "index.html" "text/plain"

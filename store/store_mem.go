@@ -13,8 +13,9 @@ import (
 
 // for early stage dev only
 type MemStore struct {
-	mx sync.RWMutex
-	kv map[string]*memTiddler
+	mx      sync.RWMutex
+	kv      map[string]*memTiddler
+	fileRef map[string]int
 }
 
 // meta should contain `title` (the key)
@@ -125,10 +126,10 @@ func (s *MemStore) Get(key string) (*TiddlyWebJSON, string) {
 // Remove any revision field
 // Remove `_is_skinny` field, and keep old text
 // Extract `text` field
-func (s *MemStore) Put(key string, tiddler *TiddlyWebJSON, hasMacro bool) (rev uint64, hash string) {
+func (s *MemStore) Put(key string, tiddler *TiddlyWebJSON, hasMacro bool, filePath string) (rev uint64, hash string) {
 	s.mx.RLock()
 	if td, ok := s.kv[key]; ok {
-		rev, hash = s.putExist(td, tiddler, hasMacro)
+		rev, hash = s.putExist(td, tiddler, hasMacro, filePath, 0)
 		s.mx.RUnlock()
 		return
 	}
@@ -136,17 +137,19 @@ func (s *MemStore) Put(key string, tiddler *TiddlyWebJSON, hasMacro bool) (rev u
 
 	s.mx.Lock()
 	// double check
+	ref := 0
 	td, ok := s.kv[key]
 	if !ok {
 		td = &memTiddler{}
 		s.kv[key] = td
+		ref = 1 // file ref += 1
 	}
-	rev, hash = s.putExist(td, tiddler, hasMacro)
+	rev, hash = s.putExist(td, tiddler, hasMacro, filePath, ref)
 	s.mx.Unlock()
 	return
 }
 
-func (s *MemStore) putExist(td *memTiddler, tiddler *TiddlyWebJSON, hasMacro bool) (rev uint64, hash string) {
+func (s *MemStore) putExist(td *memTiddler, tiddler *TiddlyWebJSON, hasMacro bool, fp string, ref int) (rev uint64, hash string) {
 	// Remove `_is_skinny` field, and keep old text
 	if tiddler.IsSkinny != nil {
 		tiddler.IsSkinny = nil
@@ -181,6 +184,12 @@ func (s *MemStore) putExist(td *memTiddler, tiddler *TiddlyWebJSON, hasMacro boo
 	td.text = text
 	td.hasMacro = hasMacro
 	td.hash = hash
+	td.file = fp
+
+	// update file ref
+	if ref != 0 && fp != "" {
+		s.fileRef[fp] += ref
+	}
 
 	return rev, hash
 }
@@ -194,7 +203,22 @@ func (s *MemStore) Del(key string) (bool, string) {
 		return false, ""
 	}
 	delete(s.kv, key)
-	return true, td.file
+
+	// skip if no file
+	if td.file == "" {
+		return true, ""
+	}
+
+	// calc file ref
+	if _, ok := s.fileRef[td.file]; ok {
+		s.fileRef[td.file] -= 1
+
+		if s.fileRef[td.file] == 0 {
+			delete(s.fileRef, td.file)
+			return true, td.file
+		}
+	}
+	return true, ""
 }
 
 func (s *MemStore) AttachAttachment(key string, file string) bool {
@@ -205,6 +229,10 @@ func (s *MemStore) AttachAttachment(key string, file string) bool {
 		return false
 	}
 	td.file = file
+
+	// count file
+	s.fileRef[file] += 1
+
 	return true
 }
 
@@ -242,6 +270,7 @@ func (s *MemStore) UnmarshalJSON(buf []byte) error {
 
 	getk := &getKey{}
 	nkv := make(map[string]*memTiddler)
+	fRef := make(map[string]int)
 	for _, dtd := range aux {
 		meta := []byte(dtd.Meta)
 		err := json.Unmarshal(meta, &getk)
@@ -263,10 +292,16 @@ func (s *MemStore) UnmarshalJSON(buf []byte) error {
 			file:     dtd.File,
 		}
 		nkv[key] = td
+
+		// count file
+		if td.file != "" {
+			fRef[td.file] += 1
+		}
 	}
 
 	s.mx.Lock()
 	s.kv = nkv
+	s.fileRef = fRef
 	s.mx.Unlock()
 
 	return nil
@@ -288,6 +323,7 @@ func (s *MemStore) Load(fp string) error {
 
 	s.mx.Lock()
 	s.kv = ns.kv
+	s.fileRef = ns.fileRef
 	s.mx.Unlock()
 
 	return nil
@@ -312,7 +348,8 @@ func (s *MemStore) Dump(fp string) error {
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		kv: make(map[string]*memTiddler),
+		kv:      make(map[string]*memTiddler),
+		fileRef: make(map[string]int),
 	}
 }
 

@@ -11,7 +11,8 @@ type Store interface {
 	// Remove any revision field
 	// Remove `_is_skinny` field, and keep old text
 	// Extract `text` field
-	Put(key string, tiddler *TiddlyWebJSON, hasMacro bool) (rev uint64, hash string)
+	// Extract external file
+	Put(key string, tiddler *TiddlyWebJSON, hasMacro bool, filePath string) (rev uint64, hash string)
 
 	Del(key string) (ok bool, file string)
 

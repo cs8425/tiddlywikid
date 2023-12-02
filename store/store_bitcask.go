@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sync"
 	"sync/atomic"
 
@@ -14,8 +16,9 @@ import (
 )
 
 type BitcaskStore struct {
-	mx sync.RWMutex
-	db *bitcask.Bitcask
+	mx      sync.RWMutex
+	db      *bitcask.Bitcask
+	fileRef *bitcask.Bitcask
 }
 
 func (s *BitcaskStore) List(ap []*TiddlyWebJSON) []byte {
@@ -123,8 +126,9 @@ func (s *BitcaskStore) get(key []byte) *StoreTiddler {
 // Remove any revision field
 // Remove `_is_skinny` field, and keep old text
 // Extract `text` field
-func (s *BitcaskStore) Put(key string, tiddler *TiddlyWebJSON, hasMacro bool) (rev uint64, hash string) {
+func (s *BitcaskStore) Put(key string, tiddler *TiddlyWebJSON, hasMacro bool, filePath string) (rev uint64, hash string) {
 	keyBuf := ([]byte)(key)
+	ref := 0
 
 	s.mx.Lock()
 	defer s.mx.Unlock()
@@ -132,8 +136,15 @@ func (s *BitcaskStore) Put(key string, tiddler *TiddlyWebJSON, hasMacro bool) (r
 	td := s.get(keyBuf)
 	if td == nil {
 		td = &StoreTiddler{}
+		ref = 1 // file ref += 1
 	}
-	rev, hash = s.putExist(td, tiddler, hasMacro)
+	rev, hash = s.putExist(td, tiddler, hasMacro, filePath, ref)
+
+	// update file ref
+	if ref != 0 && filePath != "" {
+		s.attachRef(filePath, ref)
+		// TODO: error handle
+	}
 
 	// write back
 	err := s.put(keyBuf, td)
@@ -157,7 +168,7 @@ func (s *BitcaskStore) put(key []byte, td *StoreTiddler) error {
 	return err
 }
 
-func (s *BitcaskStore) putExist(td *StoreTiddler, tiddler *TiddlyWebJSON, hasMacro bool) (rev uint64, hash string) {
+func (s *BitcaskStore) putExist(td *StoreTiddler, tiddler *TiddlyWebJSON, hasMacro bool, fp string, ref int) (rev uint64, hash string) {
 	// Remove `_is_skinny` field, and keep old text
 	if tiddler.IsSkinny != nil {
 		tiddler.IsSkinny = nil
@@ -192,6 +203,7 @@ func (s *BitcaskStore) putExist(td *StoreTiddler, tiddler *TiddlyWebJSON, hasMac
 	td.Text = text
 	td.HasMacro = hasMacro
 	td.Hash = hash
+	td.File = fp
 
 	return rev, hash
 }
@@ -208,9 +220,22 @@ func (s *BitcaskStore) Del(key string) (bool, string) {
 	}
 	err := s.db.Delete(keyBuf)
 	if err != nil {
-		return false, td.File
+		return false, ""
 	}
-	return true, td.File
+
+	// skip if no file
+	if td.File == "" {
+		return true, ""
+	}
+
+	// calc file ref
+	count, _ := s.attachRef(td.File, -1)
+	if count == 0 {
+		// delete ref key
+		s.fileRef.Delete([]byte(td.File))
+		return true, td.File
+	}
+	return true, ""
 }
 
 func (s *BitcaskStore) AttachAttachment(key string, file string) bool {
@@ -224,20 +249,45 @@ func (s *BitcaskStore) AttachAttachment(key string, file string) bool {
 	}
 	td.File = file
 
-	err := s.put(keyBuf, td)
+	// calc file ref
+	_, err := s.attachRef(file, 1)
 	if err != nil {
 		// ???
 		return false
 	}
+
+	err = s.put(keyBuf, td)
 	return err == nil
 }
 
+func (s *BitcaskStore) attachRef(file string, delta int) (int64, error) {
+	fnBuf := ([]byte)(file)
+	countBuf, err := s.fileRef.Get(fnBuf)
+	if err != nil {
+		countBuf = make([]byte, 8)
+	}
+	count := int64(binary.LittleEndian.Uint64(countBuf))
+	count += int64(delta)
+	binary.LittleEndian.PutUint64(countBuf, uint64(count))
+	err = s.fileRef.Put(fnBuf, countBuf)
+	if err != nil {
+		return -1, err
+	}
+	return count, err
+}
+
 func (s *BitcaskStore) Merge() error {
-	return s.db.Merge()
+	if err := s.db.Merge(); err != nil {
+		return err
+	}
+	return s.fileRef.Merge()
 }
 
 func (s *BitcaskStore) Close() error {
-	return s.db.Close()
+	if err := s.db.Close(); err != nil {
+		return err
+	}
+	return s.fileRef.Close()
 }
 
 func NewBitcaskStore(dir string) (*BitcaskStore, error) {
@@ -250,8 +300,21 @@ func NewBitcaskStore(dir string) (*BitcaskStore, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// file ref count
+	fRef, err := bitcask.Open(
+		path.Join(dir, "attach"),
+		bitcask.WithMaxDatafileSize(64*1024*1024), // 64 MB
+		bitcask.WithMaxKeySize(256),               // for attach filename
+		bitcask.WithMaxValueSize(8),               // for counter int64
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &BitcaskStore{
-		db: db,
+		db:      db,
+		fileRef: fRef,
 	}, nil
 }
 

@@ -9,7 +9,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"tiddlywikid/auth"
@@ -46,6 +48,7 @@ type Wiki struct {
 	UploadFileSizeLimit int64
 
 	staticFileHandle http.Handler
+	fileRe           *regexp.Regexp
 }
 
 func (wiki *Wiki) SetupMux(mux *Mux) *Mux {
@@ -70,6 +73,7 @@ func (wiki *Wiki) SetupMux(mux *Mux) *Mux {
 	wiki.staticFileHandle = http.FileServer(http.Dir(wiki.Files))
 	mux.HandleFunc("/upload/", wiki.upload)
 	mux.Handle("/files/", mux.StripPrefix("/files/", http.HandlerFunc(wiki.serveFile))) // static files
+	wiki.fileRe = regexp.MustCompile(`files/(\d){8}T(\d){6}-([A-Za-z0-9\-_]){16}`)
 
 	// for login
 	mux.HandleFunc("/challenge/tiddlywebplugins.tiddlyspace.cookie_form", wiki.login)
@@ -494,7 +498,17 @@ func (wiki *Wiki) putTiddler(w http.ResponseWriter, r *http.Request) {
 	// meta, _ := json.MarshalIndent(tiddler, "", "\t")
 	// Vln(5, "[put]2", key, (string)(meta), tiddler.IsSkinny)
 
-	rev, hash := wiki.Store.Put(key, tiddler, hasMacro)
+	// check has file and file path is like "/files/20220201T104852-VgVjI7W_aR7_nkPT"
+	fp := getCanonicalUri(tiddler.Fields)
+	if fp != "" {
+		if wiki.fileRe.MatchString(fp) {
+			fp = path.Base(fp)
+		} else {
+			fp = ""
+		}
+	}
+
+	rev, hash := wiki.Store.Put(key, tiddler, hasMacro, fp)
 	// skip title due to not used and escape issue
 	etag := fmt.Sprintf(`"%v/%v/%v:%v"`, wiki.Recipe, "", rev, hash) // recipe, title, revision, hash/checksum
 	w.Header().Set("Etag", etag)
@@ -600,7 +614,7 @@ func (wiki *Wiki) upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// save as tiddler first
-	wiki.Store.Put(tiddler.Title, tiddler, hasMacro)
+	wiki.Store.Put(tiddler.Title, tiddler, hasMacro, "")
 
 	// bind to tiddler store for auto remove
 	if !wiki.Store.AttachAttachment(tiddler.Title, attach.SaveName) {
@@ -719,6 +733,21 @@ func parseMeta(meta []byte) (*store.TiddlyWebJSON, bool, error) {
 		}
 	}
 	return tiddler, hasMacro, err
+}
+
+func getCanonicalUri(fields *store.TiddlerFields) string {
+	if fields == nil {
+		return ""
+	}
+	fpRaw, ok := (*fields)["_canonical_uri"]
+	if !ok {
+		return ""
+	}
+	fpStr, ok := fpRaw.(string)
+	if !ok {
+		return ""
+	}
+	return fpStr
 }
 
 func SetHeader(w http.ResponseWriter, cors bool) {

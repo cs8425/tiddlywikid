@@ -426,6 +426,7 @@ func (wiki *Wiki) getTiddler(w http.ResponseWriter, r *http.Request) {
 	// skip title due to not used and escape issue
 	etag := fmt.Sprintf(`"%v/%v/%v:%v"`, wiki.Recipe, "", td.Rev, hash) // recipe, title, revision, hash/checksum
 	h := w.Header()
+	h.Set("Cache-Control", "max-age=0, must-revalidate")
 	h.Set("Content-Type", "application/json")
 	if useCache {
 		h.Set("Etag", etag)

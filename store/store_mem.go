@@ -16,6 +16,8 @@ type MemStore struct {
 	mx      sync.RWMutex
 	kv      map[string]*memTiddler
 	fileRef map[string]int
+
+	ListCacheState
 }
 
 // meta should contain `title` (the key)
@@ -37,7 +39,45 @@ type memTiddler struct {
 	hasMacro bool   // `$:/tags/Macro` tag need to send `text` in skinny tiddler
 }
 
-func (s *MemStore) List(ap []*TiddlyWebJSON) []byte {
+func (s *MemStore) putText(td *memTiddler) ([]byte, error) {
+	var js map[string]interface{}
+	err := json.Unmarshal(td.meta, &js)
+	if err != nil {
+		return nil, err
+	}
+	js["text"] = td.text
+	return json.Marshal(js)
+}
+
+func (s *MemStore) List(ap []*TiddlyWebJSON, full bool) []byte {
+	// check cache for full
+	if !full {
+		fmt.Println("[list]slim")
+		buf, hasOutput := s.list(full)
+		return buildTiddlerList(buf, hasOutput, ap)
+	}
+
+	if s.ListCacheState.IsDirty() {
+		// do full and write cache
+		buf, hasOutput := s.list(full)
+		s.Set(buf, hasOutput)
+		fmt.Println("[list]full/dirty")
+	}
+	fmt.Println("[list]full")
+
+	// just do system generated data and return
+	out, ok := s.Build(ap)
+	if !ok {
+		fmt.Println("[list]full,no-cache")
+		// no cache, we need to build one
+		buf, hasOutput := s.list(full)
+		s.Set(buf, hasOutput)
+		out, _ = s.Build(ap)
+	}
+	return out
+}
+
+func (s *MemStore) list(full bool) ([]byte, bool) {
 	var b bytes.Buffer
 
 	s.mx.RLock()
@@ -45,23 +85,23 @@ func (s *MemStore) List(ap []*TiddlyWebJSON) []byte {
 
 	// need to put `revision` back
 	hasOutput := false
+	outputFull := full
 	b.WriteByte('[')
 	for _, td := range s.kv {
-		if td.hasMacro {
-			var js map[string]interface{}
-			err := json.Unmarshal(td.meta, &js)
+		if b.Len() >= ListFullTiddlerMaxSize {
+			outputFull = false
+		}
+		if td.hasMacro || outputFull {
+			buf, err := s.putText(td)
 			if err != nil {
 				continue
 			}
-			js["text"] = td.text
-			buf, _ := json.Marshal(js)
 
 			if hasOutput {
 				b.WriteByte(',')
 			}
 			b.Write(buf)
 		} else {
-
 			if hasOutput {
 				b.WriteByte(',')
 			}
@@ -73,24 +113,7 @@ func (s *MemStore) List(ap []*TiddlyWebJSON) []byte {
 		hasOutput = true
 	}
 
-	// for system generated data
-	for _, td := range ap {
-		buf, err := json.Marshal(td)
-		if err != nil {
-			continue
-		}
-
-		if hasOutput {
-			b.WriteByte(',')
-		}
-		b.Write(buf)
-
-		// flag for ','
-		hasOutput = true
-	}
-
-	b.WriteByte(']')
-	return b.Bytes()
+	return b.Bytes(), hasOutput
 }
 
 func (s *MemStore) Get(key string) (*TiddlyWebJSON, string) {
@@ -145,6 +168,7 @@ func (s *MemStore) Put(key string, tiddler *TiddlyWebJSON, hasMacro bool, filePa
 		ref = 1 // file ref += 1
 	}
 	rev, hash = s.putExist(td, tiddler, hasMacro, filePath, ref)
+	s.FlagDirty() // flag dirty
 	s.mx.Unlock()
 	return
 }
@@ -203,6 +227,7 @@ func (s *MemStore) Del(key string) (bool, string) {
 		return false, ""
 	}
 	delete(s.kv, key)
+	s.FlagDirty() // flag dirty
 
 	// skip if no file
 	if td.file == "" {

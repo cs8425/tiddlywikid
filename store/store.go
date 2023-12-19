@@ -1,7 +1,20 @@
 package store
 
+import (
+	"bytes"
+	"encoding/json"
+	"sync/atomic"
+)
+
+const (
+	// TODO: configurable
+	// Max size when outputting Tiddler with its Text
+	// more than this size will output Meta only
+	ListFullTiddlerMaxSize = 32 * 1024 * 1024 // 32MB
+)
+
 type Store interface {
-	List(ap []*TiddlyWebJSON) []byte
+	List(ap []*TiddlyWebJSON, full bool) []byte
 	// ListStream(w io.Writer, ap []*TiddlyWebJSON)) error
 
 	// string Revision set by api handler
@@ -57,4 +70,64 @@ type StoreTiddler struct {
 	Hash     string // md5? sha1? sha256?
 	File     string // external attachment
 	HasMacro bool   // `$:/tags/Macro` tag need to send `text` in skinny tiddler
+}
+
+type ListCacheState struct {
+	isDirty int32        // 1 for dirty, 0 for clear
+	cached  atomic.Value // *TiddlerListCache
+}
+
+// if true, then we must update cache
+func (cs *ListCacheState) IsDirty() bool {
+	return atomic.CompareAndSwapInt32(&cs.isDirty, 1, 0)
+}
+
+func (cs *ListCacheState) FlagDirty() {
+	atomic.StoreInt32(&cs.isDirty, 1)
+}
+
+func (cs *ListCacheState) Set(buf []byte, hasOutput bool) {
+	lc := &ListCache{
+		buf:       buf,
+		hasOutput: hasOutput,
+	}
+	cs.cached.Store(lc)
+	atomic.StoreInt32(&cs.isDirty, 0)
+}
+
+func (cs *ListCacheState) Build(ap []*TiddlyWebJSON) ([]byte, bool) {
+	c, ok := cs.cached.Load().(*ListCache)
+	if !ok {
+		return nil, false
+	}
+	return buildTiddlerList(c.buf, c.hasOutput, ap), true
+}
+
+type ListCache struct {
+	buf       []byte // `[` + tiddler + ....
+	hasOutput bool
+}
+
+func buildTiddlerList(buf []byte, hasOutput bool, ap []*TiddlyWebJSON) []byte {
+	var b bytes.Buffer
+	b.Write(buf)
+
+	// for system generated data
+	for _, td := range ap {
+		buf, err := json.Marshal(td)
+		if err != nil {
+			continue
+		}
+
+		if hasOutput {
+			b.WriteByte(',')
+		}
+		b.Write(buf)
+
+		// flag for ','
+		hasOutput = true
+	}
+
+	b.WriteByte(']')
+	return b.Bytes()
 }

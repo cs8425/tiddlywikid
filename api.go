@@ -31,6 +31,8 @@ const (
 )
 
 var (
+	_FIRST_LOAD_COOKIE = "_tiddly"
+
 	_SESSION_COOKIE = "tiddlywiki"
 	_COOKIE_TTL     = session.SESSION_TTL
 	_LOGIN_DELAY    = 500 * time.Millisecond
@@ -126,6 +128,10 @@ func (wiki *Wiki) index(w http.ResponseWriter, r *http.Request) {
 // return status by auth state
 // resp: `{"username":"","anonymous":true,"read_only":false,"space":{"recipe":"default"},"tiddlywiki_version":"5.2.3"}`
 func (wiki *Wiki) status(w http.ResponseWriter, r *http.Request) {
+
+	// set flag for full tildder @ first fetch
+	setFirstLoad(w, r)
+
 	isAnno, isLogin, user, sd := wiki.checkAuth(w, r)
 	if !isLogin {
 		user = "GUEST"
@@ -352,6 +358,9 @@ func (wiki *Wiki) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isFirst := checkAndResetFirstLoad(w, r)
+	utils.Vln(4, "[list]", r.URL.Path, isFirst)
+
 	// update CSRF
 	wiki.updateCSRF(w, r, sd)
 
@@ -362,7 +371,7 @@ func (wiki *Wiki) list(w http.ResponseWriter, r *http.Request) {
 	}
 	SetHeader(w, false)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(wiki.Store.List(tds))
+	w.Write(wiki.Store.List(tds, isFirst))
 }
 
 // TODO: check permission
@@ -774,6 +783,42 @@ func JsonRes(w http.ResponseWriter, value interface{}, cors bool) {
 // func cleanPath(fp string) string {
 // 	return filepath.FromSlash(path.Clean("/" + fp))
 // }
+
+// set in "/status"
+// check and reset in "/recipes/default/tiddlers.json"
+func setFirstLoad(w http.ResponseWriter, r *http.Request) {
+	_, err := r.Cookie(_FIRST_LOAD_COOKIE)
+	if err == http.ErrNoCookie {
+		// set cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     _FIRST_LOAD_COOKIE,
+			Value:    "1",
+			Path:     "/", // TODO: by sub path
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   int(_COOKIE_TTL.Seconds()),
+			// MaxAge:   10, // better way?
+		})
+	}
+}
+func checkAndResetFirstLoad(w http.ResponseWriter, r *http.Request) bool {
+	_, err := r.Cookie(_FIRST_LOAD_COOKIE)
+	if err == http.ErrNoCookie {
+		return false
+	}
+
+	// clear cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     _FIRST_LOAD_COOKIE,
+		Value:    "",
+		Path:     "/", // TODO: by sub path
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  utils.Now(),
+		MaxAge:   -1,
+	})
+	return true
+}
 
 func setSessionCookie(w http.ResponseWriter, token string) {
 	// update cookie

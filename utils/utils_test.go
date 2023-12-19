@@ -11,6 +11,10 @@ func TestLowPreciseTime(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	t2 := Now()
 
+	if t0 != t1 {
+		t.Fatal("LowPreciseTimer not run:", t0, t1)
+	}
+
 	if t0 == t2 {
 		t.Fatal("LowPreciseTimer not run:", t0, t2)
 	}

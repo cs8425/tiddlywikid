@@ -11,6 +11,17 @@ var (
 	LOW_PRECISE_UPDATE_TIME = 500 * time.Millisecond
 )
 
+func init() {
+	_low_precise_time.Store(time.Now())
+
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			_low_precise_time.Store(time.Now())
+		}
+	}()
+}
+
 // low precise, should enough for session
 func Now() time.Time {
 	t, ok := _low_precise_time.Load().(time.Time)

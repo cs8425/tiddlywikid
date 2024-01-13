@@ -55,8 +55,7 @@ type Wiki struct {
 	ParseMemoryLimit    int64
 	TiddlerSizeLimit    int64
 
-	staticFileHandle http.Handler
-	fileRe           *regexp.Regexp
+	fileRe *regexp.Regexp
 }
 
 func (wiki *Wiki) SetupMux(mux *Mux) *Mux {
@@ -78,7 +77,6 @@ func (wiki *Wiki) SetupMux(mux *Mux) *Mux {
 
 	// TODO: use Attachment.ServeContent()
 	// attachments plugin
-	wiki.staticFileHandle = http.FileServer(http.Dir(wiki.Files))
 	mux.HandleFunc("/upload/", wiki.upload)
 	mux.Handle("/files/", mux.StripPrefix("/files/", http.HandlerFunc(wiki.serveFile))) // static files
 	wiki.fileRe = regexp.MustCompile(`files/(\d){8}T(\d){6}-([A-Za-z0-9\-_]){16}`)
@@ -680,7 +678,26 @@ func (wiki *Wiki) serveFile(w http.ResponseWriter, r *http.Request) {
 		wiki.errNotLogin(w, r)
 		return
 	}
-	wiki.staticFileHandle.ServeHTTP(w, r)
+
+	upath := path.Join(wiki.Files, path.Clean("/"+r.URL.Path))
+	fd, err := os.Open(upath)
+	if err != nil {
+		http.NotFoundHandler().ServeHTTP(w, r)
+		return
+	}
+	info, err := fd.Stat()
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	hdr := w.Header()
+	hdr.Set("Cache-Control", "max-age=86400, must-revalidate")
+
+	// TODO: better etag
+	etag := fmt.Sprintf(`"%d-%d"`, info.ModTime().Unix(), info.Size())
+	hdr.Set("Etag", etag)
+	http.ServeContent(w, r, "", info.ModTime(), fd)
 }
 
 func NewWiki(mux *Mux, db store.Store, sess session.SessionStore) *Wiki {

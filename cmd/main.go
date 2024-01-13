@@ -33,6 +33,10 @@ var (
 
 	syncStoryList = flag.Bool("sync-story-sequence", false, "save and put $:/StoryList and $:/HistoryList, will cause some issue when multi-user/multi-window")
 
+	uploadFileSizeLimit = flag.Int64("upload-limit", api.DefaultUploadFileSizeLimit, "size limit for file uploading")
+	parseMemoryLimit    = flag.Int64("parse-limit", api.DefaultParseMemoryLimit, "max size for parsing when file uploading")
+	tiddlerSizeLimit    = flag.Int64("tiddler-size-limit", api.DefaultTiddlerSizeLimit, "max size for a tiddler")
+
 	crtFile = flag.String("crt", "", "https certificate file")
 	keyFile = flag.String("key", "", "https private key file")
 
@@ -117,6 +121,9 @@ func main() {
 		wiki.SyncStoryList = *syncStoryList
 		wiki.Files = *dir
 		wiki.Base = *wikiBase
+		wiki.UploadFileSizeLimit = *uploadFileSizeLimit
+		wiki.ParseMemoryLimit = *parseMemoryLimit
+		wiki.TiddlerSizeLimit = *tiddlerSizeLimit
 		return wiki
 	}
 

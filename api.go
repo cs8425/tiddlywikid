@@ -27,6 +27,10 @@ const (
 	HISTORYLIST_PATH = `$:/HistoryList`
 	TAGS_MACRO       = `$:/tags/Macro`
 
+	DefaultUploadFileSizeLimit = 1024 * 1024 * 256 // 256MB
+	DefaultParseMemoryLimit    = 1024 * 1024 * 64  // 64MB stored in memory, with the remainder stored on disk in temporary files
+	DefaultTiddlerSizeLimit    = 1024 * 1024 * 8   // 8MB
+
 	COOKIE_CSRF = "csrf_token"
 )
 
@@ -48,6 +52,8 @@ type Wiki struct {
 	Recipe              string // recipe, default: "default"
 	SyncStoryList       bool   // save and put `$:/StoryList` and `$:/HistoryList` (cause some issue when multi-user/multi-window)
 	UploadFileSizeLimit int64
+	ParseMemoryLimit    int64
+	TiddlerSizeLimit    int64
 
 	staticFileHandle http.Handler
 	fileRe           *regexp.Regexp
@@ -486,6 +492,7 @@ func (wiki *Wiki) putTiddler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, wiki.TiddlerSizeLimit)
 	buf, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -578,7 +585,8 @@ func (wiki *Wiki) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := r.ParseMultipartForm(wiki.UploadFileSizeLimit)
+	r.Body = http.MaxBytesReader(w, r.Body, wiki.UploadFileSizeLimit)
+	err := r.ParseMultipartForm(wiki.ParseMemoryLimit)
 	if err != nil {
 		utils.Vln(0, "[upload]parse multipart-form error", r.RemoteAddr, r.Method, r.URL, r.Referer(), r.UserAgent(), err)
 		return
@@ -690,7 +698,9 @@ func NewWiki(mux *Mux, db store.Store, sess session.SessionStore) *Wiki {
 		Base:                "index.html",
 		Recipe:              "default",
 		Files:               "./files/",
-		UploadFileSizeLimit: 1024 * 1024 * 64, // 64MB
+		UploadFileSizeLimit: DefaultUploadFileSizeLimit,
+		ParseMemoryLimit:    DefaultParseMemoryLimit,
+		TiddlerSizeLimit:    DefaultTiddlerSizeLimit,
 	}
 	return wiki
 }

@@ -23,7 +23,7 @@ get source
 build:
 
 	$ cd cmd
-	$ go build -o tiddlywikid -ldflags="-s -w" .
+	$ go build -o tiddlywikid -ldflags="-s -w" -trimpath .
 
 ## config
 
@@ -70,6 +70,9 @@ parameters:
 * `-crt <crt.pem>`, `-key <key.pem>` - PEM encoded certificate file and private key file for HTTPS server, fill empty (default) for HTTP server
 * `-sync-story-sequence` - save `$:/StoryList` and `$:/HistoryList`, will cause some issue when multi-user/multi-window
 * `-hash` - hash password with salt, print it, and exit
+* `-upload-limit` - size limit for file uploading
+* `-tiddler-size-limit` - size limit for a tiddler
+* `-parse-limit` - limit the memory usage for parsing when file uploading
 
 
 ## base image
